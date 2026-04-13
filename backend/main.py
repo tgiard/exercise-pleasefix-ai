@@ -14,10 +14,10 @@ from prompts.chat_prompts import build_agent_prompt, build_final_prompt
 
 load_dotenv()
 
-#GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL")
 #GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_2")
 #GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_3")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_4")
+#GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_4")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_GEMINI = os.getenv("MODEL_GEMINI")
 
