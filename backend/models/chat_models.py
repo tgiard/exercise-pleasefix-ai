@@ -25,10 +25,12 @@ class ChatRequest(BaseModel):
 
 class Action(BaseModel):
     type: str
-    sheet: str
-    range: str
+    # On utilise Optional (ou | None en Python 3.10+) pour dire que ce n'est pas requis
+    range: Optional[str] = None 
     values: Optional[List[List[Any]]] = None
     format: Optional[Dict[str, Any]] = None
+    sheet: Optional[str] = None
+    chart_type: Optional[str] = None
 
 class ChatResponse(BaseModel):
     answer: str

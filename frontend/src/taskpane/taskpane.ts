@@ -76,14 +76,10 @@ async function analyzeSheet() {
 
       await context.sync();
 
-      if (usedRange.isNullObject) {
-        throw new Error("The active sheet is empty.");
-      }
-
       sheetName = sheet.name;
-      values = usedRange.values;
+      values = !usedRange.isNullObject ? usedRange.values : [];
       rowCount = usedRange.rowCount;
-      columnCount = usedRange.columnCount;
+      columnCount = rowCount > 0 ? values[0].length : 0;
     });
 
     addMessage(message, "user");
@@ -148,19 +144,21 @@ async function analyzeSheet() {
     const actions = data.actions ?? [];
 
     if (actions.length > 0) {
-      setStatus(`Applying ${actions.length} workbook change(s)…`, "info");
-      for (let i = 0; i < actions.length; i++) {
-        const action = actions[i];
-        console.log("Applying action:", action);
-
-        setStatus(
-          `Applying change ${i + 1} of ${actions.length}: ${action.type ?? "unknown"}…`,
-          "info",
-        );
-
-        await runExcelAction(action);
-
-      }
+      await Excel.run(async (context) => {
+          for (const action of actions) {
+              console.log(`Processing ${action.type}...`);
+              await runExcelAction(action, context);
+              
+              // FORCE SYNC après chaque action structurelle
+              // Cela garantit que la cellule existe avant de la formater
+              if (action.type === "add_sheet" || action.type === "write_cells") {
+                  await context.sync();
+              }
+          }
+          // Sync final pour appliquer tous les styles et graphiques restants
+          console.log("🚀 Sync final vers Excel...");
+          await context.sync();
+      });
     } else {
       setStatus("No workbook changes in this reply.", "info");
     }
