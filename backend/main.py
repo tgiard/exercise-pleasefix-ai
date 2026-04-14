@@ -8,16 +8,13 @@ from google.genai import types
 from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 from models.chat_models import ChatRequest, ChatResponse, Document
-from tools.pdf_tools import extract_pdf_text
+from tools.pdf_tools import extract_pdf_text, get_pdf_page_image
 from prompts.chat_prompts import BASE_SYSTEM_PROMPT
 from prompts.chat_prompts import build_agent_prompt, build_final_prompt
 
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL")
-#GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_2")
-#GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_3")
-#GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_PERSONAL_4")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_GEMINI = os.getenv("MODEL_GEMINI")
 
@@ -49,14 +46,35 @@ def get_function_call(response):
     return None
 
 def execute_tool(function_call, tool_context):
+    # On récupère les bytes au début pour tout le monde
+    pdf_bytes = tool_context.get("pdf_bytes")
+    document_name = tool_context.get("document_name")
+
+    if not pdf_bytes:
+        return {"error": "No PDF available in context"}
+
     if function_call.name == "extract_pdf_text":
-        pdf_bytes = tool_context.get("pdf_bytes")
-        document_name = tool_context.get("document_name")
-
-        if not pdf_bytes or not document_name:
-            return {"error": "No PDF available"}
-
+        print("🔍 EXECUTION: Parsing Text...")
+        # Ici on appelle la fonction et on retourne son résultat directement
         return extract_pdf_text(pdf_bytes, document_name)
+
+    if function_call.name == "analyze_pdf_page_visually":
+        print("📸 EXECUTION: Parsing Image...")
+        page_num = function_call.args.get("page_number")
+        
+        # Sécurité : si Gemini oublie de donner le numéro de page
+        if not page_num:
+            return {"error": "Missing page_number argument"}
+            
+        image_bytes = get_pdf_page_image(pdf_bytes, page_num)
+        
+        if image_bytes:
+            with open(f"debug_page_{page_num}.jpg", "wb") as f:
+                f.write(image_bytes)
+            print(f"✅ Image debug_page_{page_num}.jpg sauvegardée.")
+            return {"image_bytes": image_bytes, "page": page_num}
+        else:
+            return {"error": f"Failed to convert page {page_num} to image"}
 
     return {"error": f"Unknown tool: {function_call.name}"}
 
@@ -125,6 +143,17 @@ async def chat(
                         "type": "object",
                         "properties": {},
                     },
+                ),
+                types.FunctionDeclaration(
+                    name="analyze_pdf_page_visually",
+                    description="Captures a visual snapshot of a specific PDF page. Use this for charts, tables, or if the text seems corrupted.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "page_number": {"type": "integer", "description": "The page number (1-indexed)"}
+                        },
+                        "required": ["page_number"]
+                    },
                 )
             ]
         )
@@ -133,50 +162,71 @@ async def chat(
    # LLM CALL
     try:
         max_tool_iterations = 5   
-        agent_state = agent_prompt
+        agent_state = [types.Content(role="user", parts=[types.Part.from_text(text=agent_prompt)])]
         tool_iteration_count = 0
 
         while True:
-            print("AGENT LOOP ITERATION:", tool_iteration_count)
+            print(f"AGENT LOOP ITERATION: {tool_iteration_count}")
+            
             response = gemini_client.models.generate_content(
                 model=MODEL_GEMINI,
                 contents=agent_state,
-                config=types.GenerateContentConfig(
-                    tools=tools
-                ),
+                config=types.GenerateContentConfig(tools=tools),
             )
+
+            if response.candidates[0].content:
+                agent_state.append(response.candidates[0].content)
 
             function_call = get_function_call(response)
 
             if not function_call:
                 break
 
+            # Exécution de l'outil
             tool_result = execute_tool(function_call, tool_context)
 
-            agent_state += f"""
-
-            Tool result:
-            {json.dumps(tool_result, indent=2)}
-            """
+            # GESTION SPÉCIFIQUE DE LA VISION
+            if function_call.name == "analyze_pdf_page_visually" and "image_bytes" in tool_result:
+                # On renvoie l'image directement dans l'historique
+                agent_state.append(types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_bytes(
+                            data=tool_result["image_bytes"], 
+                            mime_type="image/jpeg"
+                        ),
+                        types.Part.from_text(text=f"Here is the visual of page {tool_result['page']}. Please analyze the charts/tables.")
+                    ]
+                ))
+            else:
+                # Réponse textuelle classique pour les autres outils
+                agent_state.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=json.dumps(tool_result, indent=2))]
+                ))
 
             tool_iteration_count += 1
-
             if tool_iteration_count >= max_tool_iterations:
                 break
 
         print("FINAL CONTEXT READY")
 
-        final_prompt = build_final_prompt(agent_state, request.message)
+        # Au lieu de reconstruire un prompt texte, on ajoute une consigne à l'historique
+        final_instruction = build_final_prompt(request.message)
+        agent_state.append(types.Content(
+            role="user", 
+            parts=[types.Part.from_text(text=final_instruction)]
+        ))
 
         follow_up_response = gemini_client.models.generate_content(
             model=MODEL_GEMINI,
-            contents=final_prompt,
+            contents=agent_state, # On envoie TOUT l'historique avec l'image
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
             ),
         )
 
-        answer = follow_up_response.text if follow_up_response.text else "No response from model."
+        answer = follow_up_response.text if follow_up_response.text else "No response."
 
     except Exception as e:
         print("GEMINI ERROR:", e)

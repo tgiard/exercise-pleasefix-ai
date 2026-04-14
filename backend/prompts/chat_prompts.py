@@ -31,12 +31,31 @@ Allowed action types:
 - "write_cells"
 - "update_cells"
 - "clear_range"
+- "format_cells"
+- "create_chart"
 
 For "write_cells":
 - "range" must indicate the top-left starting cell only
 - do not compute the full rectangular Excel range
 - the client will resize the destination range automatically based on "values"
 - "values" must be a 2D array
+
+  For "format_cells":
+  - "range" is the target range (e.g., "A15:C15")
+  - "format" is an object: {"bold": true, "italic": true, "font_size": 12, "font_color": "#FFFFFF", "bg_color": "#4472C4"}
+
+  Example for a header:
+  {
+    "type": "format_cells",
+    "sheet": "Sheet1",
+    "range": "A15:C15",
+    "format": {"bold": true, "bg_color": "#000000", "font_color": "#FFFFFF"}
+  }
+
+  For "create_chart": Creates a chart based on a range.
+    - "range": The data source (e.g., "A15:B20").
+    - "chart_type": One of "Column", "Line", "Pie", "Bar".
+    - "title": String for the chart title.
 
 Do not use any other field names such as:
 - "action_type"
@@ -63,6 +82,10 @@ Example with action:
   ]
 }
 
+When analyzing charts or tables, prioritize the visual data from analyze_pdf_page_visually over the text from extract_pdf_text. 
+If you see a chart, transcribe the exact numbers and labels shown on the image. 
+Do not use external knowledge or data from other pages.
+
 Do NOT wrap the JSON in a string.
 Do NOT escape quotes.
 Return a raw JSON object.
@@ -86,43 +109,13 @@ Available PDF:
 {document_name}
 """
 
-def build_final_prompt(agent_state, message):
+def build_final_prompt(message):
     return f"""
-You are a private equity analyst.
+Based on the visual and textual analysis you just performed, provide your final response.
+User question: {message}
 
-You must ALWAYS:
-- return valid JSON only
-- return exactly one JSON object
-- use exactly these top-level keys: "answer", "actions"
-- never return markdown
-- never return explanations outside JSON
-
-Use the full context below to answer the user's question.
-
-Context:
-{agent_state}
-
-User question:
-{message}
-
-Answer the user's question directly.
-Do not introduce yourself.
-Answer only the user's specific question.
-Do not summarize the full document unless explicitly asked.
-
-Only return Excel actions if you are fully certain the value is incorrect based on explicit comparison between Excel context and document data.
-If there is any ambiguity, return no action.
-
-Return only one JSON object with:
-- "answer": a string
-- "actions": an array of Excel action objects
-
-If no Excel action is needed, return:
-{{
-  "answer": "your answer",
-  "actions": []
-}}
-
-Do not put suggestions, capabilities, or bullet points inside "actions".
-"actions" must contain only executable Excel action objects.
+Remember: 
+- Return RAW JSON only.
+- Follow the structure: {{"answer": "...", "actions": [...]}}
+- Be extremely precise with the numbers from the chart you just saw.
 """

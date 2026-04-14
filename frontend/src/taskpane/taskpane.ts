@@ -1,4 +1,13 @@
 /* global console, document, Excel, Office */
+import { 
+  runExcelAction
+} from "./excel_actions";
+
+import { 
+  setStatus, 
+  scrollOutputToBottom, 
+  addMessage
+} from "./ui_utils";
 
 let conversationHistory: { role: string; content: string }[] = [];
 
@@ -37,126 +46,6 @@ Office.onReady((info) => {
     }
   }
 });
-
-function setStatus(
-  message: string,
-  type: "info" | "success" | "error" = "info",
-) {
-  const statusDiv = document.getElementById("status");
-  if (!statusDiv) return;
-
-  const color =
-    type === "error" ? "#fee2e2" : type === "success" ? "#dcfce7" : "#e0f2fe";
-
-  const safe = message
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
-
-  statusDiv.innerHTML = `
-    <div style="
-      background:${color};
-      padding:8px;
-      border-radius:6px;
-      white-space:normal;
-      word-break:break-word;
-    ">
-      ${safe}
-    </div>
-  `;
-}
-
-function scrollOutputToBottom() {
-  const outputDiv = document.getElementById("output");
-  if (!outputDiv) return;
-  requestAnimationFrame(() => {
-    outputDiv.scrollTop = outputDiv.scrollHeight;
-  });
-}
-
-function addMessage(message: string, role: "user" | "assistant") {
-  const outputDiv = document.getElementById("output");
-  if (!outputDiv) return;
-
-  const background = role === "user" ? "#e0f2fe" : "#f3f4f6";
-  const title = role === "user" ? "🧑‍💻 Vous" : "🤖 Assistant";
-
-  const formatted = message
-    .replace(/\n/g, "<br>")
-    .replace(/- /g, "• ");
-
-  outputDiv.innerHTML += `
-    <div style="
-      background:${background};
-      padding:12px;
-      border-radius:8px;
-      margin-bottom:8px;
-      font-family:system-ui;
-      line-height:1.5;
-    ">
-      <strong>${title}</strong><br><br>
-      ${formatted}
-    </div>
-  `;
-
-  scrollOutputToBottom();
-}
-
-function padValuesToRectangle(values: any[][]): any[][] {
-  const numRows = values.length;
-  const numCols = values.reduce(
-    (max, row) => Math.max(max, Array.isArray(row) ? row.length : 0),
-    0,
-  );
-  if (numRows === 0 || numCols === 0) return [];
-
-  return values.map((row) => {
-    const r = Array.isArray(row) ? [...row] : [];
-    while (r.length < numCols) r.push("");
-    return r.slice(0, numCols);
-  });
-}
-
-async function applyWriteAction(action: any) {
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getItem(action.sheet);
-    const anchor = sheet.getRange(action.range);
-    const raw = action.values as any[][];
-
-    if (!raw?.length) {
-      await context.sync();
-      return;
-    }
-
-    const padded = padValuesToRectangle(raw);
-    if (padded.length === 0) {
-      await context.sync();
-      return;
-    }
-
-    const numRows = padded.length;
-    const numCols = padded[0].length;
-
-    const topLeft = anchor.getCell(0, 0);
-    const target = topLeft.getResizedRange(numRows - 1, numCols - 1);
-
-    target.values = padded;
-
-    await context.sync();
-  });
-}
-
-async function applyClearAction(action: any) {
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getItem(action.sheet);
-    const range = sheet.getRange(action.range);
-
-    range.clear(Excel.ClearApplyTo.contents);
-
-    await context.sync();
-  });
-}
 
 async function analyzeSheet() {
   const inputEl = document.getElementById("user-input") as HTMLInputElement;
@@ -269,19 +158,8 @@ async function analyzeSheet() {
           "info",
         );
 
-        if (action.type === "write_cells") {
-          await applyWriteAction(action);
-        } else if (action.type === "clear_range") {
-          await applyClearAction(action);
-        } else if (action.type === "update_cells") {
-          await applyWriteAction(action);
-        } else {
-          console.warn("Unknown action type:", action.type, action);
-          setStatus(
-            `Skipped unknown action type “${String(action.type)}” (${i + 1}/${actions.length}).`,
-            "info",
-          );
-        }
+        await runExcelAction(action);
+
       }
     } else {
       setStatus("No workbook changes in this reply.", "info");

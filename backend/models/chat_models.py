@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 
 # ---------- INPUT ----------
 
@@ -28,6 +28,7 @@ class Action(BaseModel):
     sheet: str
     range: str
     values: Optional[List[List[Any]]] = None
+    format: Optional[Dict[str, Any]] = None
 
 class ChatResponse(BaseModel):
     answer: str
